@@ -67,3 +67,8 @@ echo "==== Docker jobs completed ===="
 EOF
 
 echo "==== SCRIPT FINISHED SUCCESSFULLY ===="
+
+sleep 120
+
+echo "==== Initiating shutdown ===="
+sudo shutdown -h now
