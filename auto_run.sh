@@ -34,7 +34,7 @@ CHAT_ID=$(aws ssm get-parameter \
 
 send_telegram() {
   echo "📩 Sending Telegram message..."
-  curl -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+  curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
     -d chat_id="${CHAT_ID}" \
     -d parse_mode="HTML" \
     -d text="$1" || echo "⚠️ Telegram failed"
