@@ -64,7 +64,7 @@ terminate_ec2() {
 # SYSTEM SETUP
 # =============================
 sudo yum update -y
-sudo yum install -y docker awscli curl
+sudo yum install -y docker awscli
 sudo systemctl enable docker
 sudo systemctl start docker
 sudo usermod -aG docker ec2-user
