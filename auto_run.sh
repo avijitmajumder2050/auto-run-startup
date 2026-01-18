@@ -33,24 +33,22 @@ CHAT_ID=$(aws ssm get-parameter \
   --output text)
 
 send_telegram() {
-  echo "📩 Sending Telegram message..."
   curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
     -d chat_id="${CHAT_ID}" \
     -d parse_mode="HTML" \
-    -d text="$1" || echo "⚠️ Telegram failed"
+    -d text="$1" > /dev/null || true
 }
 
 # =============================
 # EC2 TERMINATION
 # =============================
 terminate_ec2() {
-  echo "🛑 Terminating EC2..."
-
-  TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
+  IMDS_TOKEN=$(curl -s -X PUT \
+    "http://169.254.169.254/latest/api/token" \
     -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
 
   INSTANCE_ID=$(curl -s \
-    -H "X-aws-ec2-metadata-token: $TOKEN" \
+    -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
     http://169.254.169.254/latest/meta-data/instance-id)
 
   aws ec2 terminate-instances \
@@ -87,20 +85,18 @@ docker pull ${ECR_REGISTRY}/dhan-ohlc-job:latest
 # -----------------------------
 # TOKEN REFRESH (RETRY)
 # -----------------------------
-TOKEN_SUCCESS=false
-
 for i in 1 2 3; do
-  echo "🔁 Token Refresh attempt \$i"
+  echo "Token Refresh attempt \$i"
   if docker run --rm \
     ${ECR_REGISTRY}/dhan-token-refresh:latest \
     >> /home/ec2-user/logs/token.log 2>&1; then
-    TOKEN_SUCCESS=true
+    echo "TOKEN_SUCCESS" > /tmp/job_status
     break
   fi
   sleep ${RETRY_SLEEP}
 done
 
-if [ "\$TOKEN_SUCCESS" != "true" ]; then
+if [ ! -f /tmp/job_status ]; then
   echo "TOKEN_FAILED" > /tmp/job_status
   exit 1
 fi
@@ -108,44 +104,42 @@ fi
 # -----------------------------
 # OHLC JOB (RETRY)
 # -----------------------------
-OHLC_SUCCESS=false
+rm -f /tmp/job_status
 
 for i in 1 2 3; do
-  echo "🔁 OHLC attempt \$i"
+  echo "OHLC attempt \$i"
   if docker run --rm \
     ${ECR_REGISTRY}/dhan-ohlc-job:latest \
     >> /home/ec2-user/logs/ohlc.log 2>&1; then
-    OHLC_SUCCESS=true
+    echo "SUCCESS" > /tmp/job_status
     break
   fi
   sleep ${RETRY_SLEEP}
 done
 
-if [ "\$OHLC_SUCCESS" != "true" ]; then
+if [ ! -f /tmp/job_status ]; then
   echo "OHLC_FAILED" > /tmp/job_status
   exit 1
 fi
-
-echo "SUCCESS" > /tmp/job_status
 EOF
 
 # =============================
-# RESULT HANDLING
+# RESULT HANDLING (SAFE)
 # =============================
-STATUS=$(cat /tmp/job_status || echo "FAILED")
+STATUS=$(cat /tmp/job_status 2>/dev/null || echo "FAILED")
 
 if [ "$STATUS" = "SUCCESS" ]; then
-  send_telegram "<b>✅ Token Refresh & OHLC SUCCESS</b>
+  send_telegram "<b>Token Refresh and OHLC SUCCESS</b>
 
 All jobs completed successfully.
-EC2 will now terminate.
+EC2 instance will now terminate.
 
-<i>⚠️ Educational purpose only. No buy/sell recommendation.</i>" || true
+<i>Educational purpose only. No buy/sell recommendation.</i>"
 else
-  send_telegram "<b>❌ Job FAILED</b>
+  send_telegram "<b>Job FAILED</b>
 
-Token or OHLC failed after retries.
-EC2 will now terminate." || true
+Token refresh or OHLC failed after retries.
+EC2 instance will now terminate."
 fi
 
 terminate_ec2
