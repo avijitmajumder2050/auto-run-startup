@@ -60,11 +60,11 @@ terminate_ec2() {
 # -----------------------------
 # System setup
 # -----------------------------
-yum update -y
-yum install -y docker awscli
-systemctl enable docker
-systemctl start docker
-usermod -aG docker ec2-user
+sudo yum update -y
+sudo yum install -y docker awscli
+sudo systemctl enable docker
+sudo systemctl start docker
+sudo usermod -aG docker ec2-user
 
 mkdir -p /home/ec2-user/logs
 chown ec2-user:ec2-user /home/ec2-user/logs
