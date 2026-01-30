@@ -1,9 +1,16 @@
 #!/bin/bash
+# =====================================
+# Auto-run Docker Jobs with Unified Log
+# =====================================
+
+# Append ALL stdout + stderr to auto-run log
+exec >> /var/log/auto-run.log 2>&1
 set -euo pipefail
 
 REGION="ap-south-1"
 MAX_RETRIES=3
 RETRY_SLEEP=60
+echo "===== Auto-run started at $(date) ====="
 
 # =============================
 # AWS / ECR
@@ -87,9 +94,8 @@ docker pull ${ECR_REGISTRY}/dhan-ohlc-job:latest
 # -----------------------------
 for i in 1 2 3; do
   echo "Token Refresh attempt \$i"
-  if docker run --rm \
-    ${ECR_REGISTRY}/dhan-token-refresh:latest \
-    >> /home/ec2-user/logs/token.log 2>&1; then
+  
+  if docker run --rm ${ECR_REGISTRY}/dhan-token-refresh:latest; then
     echo "TOKEN_SUCCESS" > /tmp/job_status
     break
   fi
@@ -108,9 +114,8 @@ rm -f /tmp/job_status
 
 for i in 1 2 3; do
   echo "OHLC attempt \$i"
-  if docker run --rm \
-    ${ECR_REGISTRY}/dhan-ohlc-job:latest \
-    >> /home/ec2-user/logs/ohlc.log 2>&1; then
+  
+  if docker run --rm ${ECR_REGISTRY}/dhan-ohlc-job:latest; then
     echo "SUCCESS" > /tmp/job_status
     break
   fi
@@ -142,4 +147,5 @@ Token refresh or OHLC failed after retries.
 EC2 instance will now terminate."
 fi
 
+echo "===== Auto-run finished at $(date) ====="
 terminate_ec2
