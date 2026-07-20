@@ -6,12 +6,9 @@
 set -e
 
 LOG=/var/log/auto-run-bootstrap.log
-exec > >(tee -a "$LOG") 2>&1
+exec > >(tee -a $LOG) 2>&1
 
-echo "======================================="
 echo "🚀 Bootstrapping Trading Bot EC2"
-echo "======================================="
-
 # -----------------------------
 # CONFIG
 # -----------------------------
@@ -23,6 +20,7 @@ HOME_DIR="/home/ec2-user"
 APP_DIR="$HOME_DIR/auto-run-startup"
 
 LOG_FILE="/var/log/auto-run.log"
+S3_BUCKET="s3://dhan-trading-data"
 S3_PREFIX="trading-bot"
 
 echo "==== User data started at $(date) ===="
@@ -31,68 +29,41 @@ echo "==== User data started at $(date) ===="
 # Install required packages
 # -----------------------------
 yum update -y
-yum install -y git awscli
+yum install -y git awscli 
 timedatectl set-timezone Asia/Kolkata
-
-# -----------------------------
-# Detect S3 Bucket
-# -----------------------------
-BUCKET_CANDIDATES=(
-    "new-dhan-trading-data"
-    "dhan-trading-data"
-)
-
-S3_BUCKET=""
-
-for bucket in "${BUCKET_CANDIDATES[@]}"; do
-    if aws s3api head-bucket \
-        --bucket "$bucket" \
-        --region "$REGION" >/dev/null 2>&1; then
-
-        S3_BUCKET="s3://$bucket"
-        echo "Using S3 bucket: $bucket"
-        break
-    fi
-done
-
-if [ -z "$S3_BUCKET" ]; then
-    echo "ERROR: No accessible S3 bucket found."
-    exit 1
-fi
 
 # -----------------------------
 # Fetch GitHub repo URL
 # -----------------------------
 REPO_URL=$(aws ssm get-parameter \
-    --name "$PARAM_NAME" \
-    --region "$REGION" \
-    --query "Parameter.Value" \
-    --output text)
+  --name "$PARAM_NAME" \
+  --region "$REGION" \
+  --query "Parameter.Value" \
+  --output text)
 
 if [ -z "$REPO_URL" ]; then
-    echo "ERROR: Repo URL not found in Parameter Store."
-    exit 1
+  echo "ERROR: Repo URL not found in Parameter Store"
+  exit 1
 fi
 
-echo "Using repository: $REPO_URL"
+echo "Using repo: $REPO_URL"
 
 # -----------------------------
-# Clone / Update Repository
+# Clone or update repo
 # -----------------------------
 if [ ! -d "$APP_DIR" ]; then
-    git clone "$REPO_URL" "$APP_DIR"
+  git clone "$REPO_URL" "$APP_DIR"
 else
-    cd "$APP_DIR"
-    git pull
+  cd "$APP_DIR" && git pull
 fi
 
-chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+chown -R ec2-user:ec2-user "$APP_DIR"
 chmod +x "$APP_DIR/auto_run.sh"
 
 # -----------------------------
-# Systemd Service
+# auto-run systemd service
 # -----------------------------
-cat >/etc/systemd/system/auto-run.service <<EOF
+tee /etc/systemd/system/auto-run.service > /dev/null <<EOF
 [Unit]
 Description=Auto Run DHAN Jobs on Boot
 After=network-online.target
@@ -112,27 +83,25 @@ WantedBy=multi-user.target
 EOF
 
 # -----------------------------
-# Log Upload Script
+# Log upload script
 # -----------------------------
-cat >/usr/local/bin/upload-auto-run-log.sh <<EOF
+tee /usr/local/bin/upload-auto-run-log.sh > /dev/null <<EOF
 #!/bin/bash
-
 if [ -f "$LOG_FILE" ]; then
-    aws s3 cp \
-        "$LOG_FILE" \
-        "$S3_BUCKET/$S3_PREFIX/logs/auto-run.log" \
-        --region "$REGION" || true
+  aws s3 cp "$LOG_FILE" \
+    "$S3_BUCKET/$S3_PREFIX/logs/auto-run.log" \
+    --region "$REGION" || true
 fi
 EOF
 
 chmod +x /usr/local/bin/upload-auto-run-log.sh
 
 # -----------------------------
-# Log Upload Service
+# Log upload service
 # -----------------------------
-cat >/etc/systemd/system/auto-run-log-upload.service <<EOF
+tee /etc/systemd/system/auto-run-log-upload.service > /dev/null <<EOF
 [Unit]
-Description=Upload Auto Run Log to S3
+Description=Upload auto-run.log to S3
 
 [Service]
 Type=oneshot
@@ -140,11 +109,11 @@ ExecStart=/usr/local/bin/upload-auto-run-log.sh
 EOF
 
 # -----------------------------
-# Log Upload Timer
+# Log upload timer (5 min)
 # -----------------------------
-cat >/etc/systemd/system/auto-run-log-upload.timer <<EOF
+tee /etc/systemd/system/auto-run-log-upload.timer > /dev/null <<EOF
 [Unit]
-Description=Upload Auto Run Log Every 5 Minutes
+Description=Upload auto-run.log to S3 every 5 minutes
 
 [Timer]
 OnBootSec=2min
@@ -156,18 +125,13 @@ WantedBy=timers.target
 EOF
 
 # -----------------------------
-# Enable Services
+# Enable services
 # -----------------------------
 systemctl daemon-reload
-
 systemctl enable auto-run.service
-systemctl restart auto-run.service
 
-systemctl enable auto-run-log-upload.timer
-systemctl start auto-run-log-upload.timer
+systemctl enable --now auto-run-log-upload.timer
+systemctl restart  auto-run.service
+echo "==== User data completed at $(date) ===="
 
-echo "======================================="
-echo "Bootstrap completed successfully."
-echo "Active bucket: $S3_BUCKET"
-echo "Completed at $(date)"
-echo "======================================="
+echo "✅ Trading Bot started; /var/log/auto-run-bootstrap.log uploads to S3 only"
